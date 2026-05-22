@@ -37,7 +37,7 @@
 // of an offline exit node is that ChatGPT/Claude/Grok stop working;
 // other sites are unaffected.
 
-const PSK = "hEdlfu3TRz36wrD5l2VOjeqf7Ez0eH5i";
+const PSK = "PrzVPs186teVqGxIia1IN73Z14PHTt0m";
 
 // Headers the client may send that must NOT be forwarded to the
 // destination — they're hop-by-hop or would break re-encoding.
@@ -84,7 +84,7 @@ function sanitizeHeaders(h: unknown): Record<string, string> {
 export async function handleExitNodeRequest(req: Request): Promise<Response> {
   // Fail closed on the placeholder PSK so a fresh deploy without setup
   // can't accidentally serve as an open relay.
-  if (PSK === "hEdlfu3TRz36wrD5l2VOjeqf7Ez0eH5i") {
+  if (PSK === "PrzVPs186teVqGxIia1IN73Z14PHTt0m") {
     return Response.json(
       {
         e:
@@ -144,7 +144,7 @@ export async function handleExitNodeRequest(req: Request): Promise<Response> {
       headers: h,
       // TS sometimes doesn't accept Uint8Array as BodyInit depending on lib
       // versions; cast to unknown->BodyInit to satisfy the typechecker.
-      body: (payload as unknown) as BodyInit | undefined,
+      body: payload ? new Uint8Array(payload) : undefined,
       redirect: "manual",
     });
 
