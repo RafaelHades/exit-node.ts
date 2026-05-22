@@ -15,29 +15,19 @@
 //      Deploy, fly.io with a thin server wrapper, or any cheap VPS
 //      running Deno / Node + this script as a handler).
 //   2. Paste the contents of this file as the request handler.
-//   3. Set PSK below to a strong secret (`openssl rand -hex 32` from
-//      a terminal — DO NOT leave the placeholder in production).
+//   3. Set PSK environment variable to a strong secret (`openssl rand -hex 32`)
 //   4. Deploy and copy the public URL of the deployed handler.
-//   5. In mhrv-rs config.json, add:
-//        "exit_node": {
-//          "enabled": true,
-//          "relay_url": "https://your-deployed-exit-node.example.com",
-//          "psk": "<the same PSK you set above>",
-//          "mode": "selective",
-//          "hosts": ["chatgpt.com", "claude.ai", "x.com", "grok.com"]
-//        }
+//   5. In mhrv-rs config.json, add exit_node section with the same PSK.
 //
 // Threat model: PSK is the only thing keeping this from being an open
 // proxy on the public internet. Treat it like a password: do not commit
 // to source control, do not share publicly, rotate if leaked. The exit
 // node refuses all requests that don't carry the matching PSK.
-//
-// Failure mode: if the exit node is unreachable, mhrv-rs falls back to
-// the regular Apps Script relay automatically — the only consequence
-// of an offline exit node is that ChatGPT/Claude/Grok stop working;
-// other sites are unaffected.
 
-const PSK = "PrzVPs186teVqGxIia1IN73Z14PHTt0m";
+// ============================================================
+// IMPORTANT: Read PSK from environment variable, NOT hardcoded!
+// ============================================================
+const PSK = Deno.env.get("PSK");
 
 // Headers the client may send that must NOT be forwarded to the
 // destination — they're hop-by-hop or would break re-encoding.
@@ -82,14 +72,12 @@ function sanitizeHeaders(h: unknown): Record<string, string> {
 }
 
 export async function handleExitNodeRequest(req: Request): Promise<Response> {
-  // Fail closed on the placeholder PSK so a fresh deploy without setup
-  // can't accidentally serve as an open relay.
-  if (PSK === "PrzVPs186teVqGxIia1IN73Z14PHTt0m") {
+  // Check if PSK is configured properly
+  if (!PSK) {
     return Response.json(
       {
-        e:
-          "exit_node misconfigured: PSK is still the placeholder. Set " +
-          "a strong secret in the source before deploying.",
+        e: "exit_node misconfigured: PSK environment variable is not set. " +
+            "Please add PSK to Deno Deploy Environment Variables.",
       },
       { status: 503 },
     );
@@ -119,8 +107,6 @@ export async function handleExitNodeRequest(req: Request): Promise<Response> {
     }
 
     // Loop guard: if u points at this exit node's own host, refuse.
-    // Without this, a misconfigured client could chain exit-node →
-    // exit-node → exit-node → ... and burn the host's runtime budget.
     try {
       const reqUrl = new URL(req.url);
       const dstUrl = new URL(u);
@@ -142,21 +128,10 @@ export async function handleExitNodeRequest(req: Request): Promise<Response> {
     const resp = await fetch(u, {
       method: m,
       headers: h,
-      // TS sometimes doesn't accept Uint8Array as BodyInit depending on lib
-      // versions; cast to unknown->BodyInit to satisfy the typechecker.
-      body: payload ? new Uint8Array(payload) : undefined,
+      body: payload,
       redirect: "manual",
     });
 
-    // `fetch()` (Deno / Bun / Node) auto-decompresses gzip / br / deflate
-    // responses, so `resp.arrayBuffer()` returns plain bytes — but the
-    // destination's `Content-Encoding` header is still on `resp.headers`.
-    // Forwarding it would tell the client browser "this body is gzipped"
-    // when it isn't, producing `Content Encoding Error` (#964). Same goes
-    // for `Content-Length` — the post-decompression byte count is
-    // different from what the destination announced. Strip both. The
-    // Apps Script + Rust transport layer below us re-frames the wire body
-    // anyway, so neither header is meaningful to forward.
     const data = new Uint8Array(await resp.arrayBuffer());
     const respHeaders: Record<string, string> = {};
     resp.headers.forEach((value, key) => {
